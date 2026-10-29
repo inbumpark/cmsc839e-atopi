@@ -1,0 +1,7 @@
+# Quick end-to-end check on the generated sample data (scripts/make_sample_data.py).
+# Inherits everything from default.yaml and overrides only the keys below.
+base: default.yaml
+run_name: smoke
+data_path: data/sample/cases.jsonl
+max_cases: 2
+n_samples: 1

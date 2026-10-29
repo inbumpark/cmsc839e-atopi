@@ -1,0 +1,164 @@
+# Canonical label -> aliases. Free-text diagnoses are mapped to the canonical label whose
+# alias appears earliest in the answer (longest alias wins ties), then by fuzzy match.
+# Canonical names should match the "label" strings in cases.jsonl exactly; any label found in
+# the data is added automatically, but add aliases here so paraphrases are graded correctly.
+# After a run, check analysis/unmatched_diagnoses.csv and extend this file, then re-run analyze.
+Eczema:
+  - eczema
+  - atopic dermatitis
+  - atopic eczema
+  - nummular eczema
+  - nummular dermatitis
+  - discoid eczema
+  - dyshidrotic eczema
+  - dyshidrosis
+  - pompholyx
+  - asteatotic eczema
+  - eczema craquele
+  - xerotic eczema
+Allergic Contact Dermatitis:
+  - allergic contact dermatitis
+Irritant Contact Dermatitis:
+  - irritant contact dermatitis
+CD - Contact dermatitis:
+  - contact dermatitis
+Seborrheic Dermatitis:
+  - seborrheic dermatitis
+  - seborrhoeic dermatitis
+  - dandruff
+Stasis Dermatitis:
+  - stasis dermatitis
+  - venous eczema
+  - gravitational eczema
+Perioral Dermatitis:
+  - perioral dermatitis
+Lichen Simplex Chronicus:
+  - lichen simplex chronicus
+  - neurodermatitis
+Prurigo nodularis:
+  - prurigo nodularis
+Psoriasis:
+  - psoriasis
+  - plaque psoriasis
+  - guttate psoriasis
+  - inverse psoriasis
+Urticaria:
+  - urticaria
+  - hives
+  - wheals
+Insect Bite:
+  - insect bite
+  - insect bites
+  - bug bite
+  - bug bites
+  - arthropod bite
+  - mosquito bite
+  - flea bites
+  - bed bug bites
+Scabies:
+  - scabies
+Folliculitis:
+  - folliculitis
+Acne:
+  - acne
+  - acne vulgaris
+Rosacea:
+  - rosacea
+Tinea:
+  - tinea
+  - ringworm
+  - tinea corporis
+  - tinea cruris
+  - jock itch
+  - tinea pedis
+  - athlete's foot
+  - dermatophytosis
+  - fungal infection
+Tinea Versicolor:
+  - tinea versicolor
+  - pityriasis versicolor
+Candida:
+  - candida
+  - candidiasis
+  - cutaneous candidiasis
+  - yeast infection
+Intertrigo:
+  - intertrigo
+Impetigo:
+  - impetigo
+Cellulitis:
+  - cellulitis
+Herpes Zoster:
+  - herpes zoster
+  - shingles
+Herpes Simplex:
+  - herpes simplex
+  - cold sore
+  - hsv
+Molluscum Contagiosum:
+  - molluscum contagiosum
+  - molluscum
+Viral Exanthem:
+  - viral exanthem
+  - viral rash
+Pityriasis rosea:
+  - pityriasis rosea
+Lichen planus/lichenoid eruption:
+  - lichen planus
+  - lichenoid eruption
+Keratosis pilaris:
+  - keratosis pilaris
+Miliaria:
+  - miliaria
+  - heat rash
+  - prickly heat
+Drug Rash:
+  - drug rash
+  - drug eruption
+  - drug reaction
+  - morbilliform drug eruption
+Erythema multiforme:
+  - erythema multiforme
+Granuloma annulare:
+  - granuloma annulare
+Pigmented purpuric eruption:
+  - pigmented purpuric eruption
+  - pigmented purpuric dermatosis
+  - schamberg
+Leukocytoclastic Vasculitis:
+  - leukocytoclastic vasculitis
+  - vasculitis
+Cutaneous lupus:
+  - cutaneous lupus
+  - discoid lupus
+  - lupus
+Post-Inflammatory hyperpigmentation:
+  - post-inflammatory hyperpigmentation
+  - postinflammatory hyperpigmentation
+  - pih
+Vitiligo:
+  - vitiligo
+Seborrheic Keratosis:
+  - seborrheic keratosis
+Actinic Keratosis:
+  - actinic keratosis
+Basal Cell Carcinoma:
+  - basal cell carcinoma
+  - bcc
+SCC/SCCIS:
+  - squamous cell carcinoma
+  - scc
+  - bowen's disease
+Melanoma:
+  - melanoma
+Melanocytic Nevi:
+  - melanocytic nevus
+  - nevus
+  - mole
+Abrasion, scrape, or scab:
+  - abrasion
+  - scrape
+  - scab
+Burn of skin:
+  - burn
+  - sunburn

@@ -1,0 +1,7 @@
+ollama
+pyyaml
+pandas
+scipy
+matplotlib
+pillow
+pytest
