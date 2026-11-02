@@ -22,6 +22,7 @@ Every (case, stage, mode) is sampled `n_samples` times (default 5) with differen
 ### Requirements
 - **macOS on Apple Silicon** (tested on an M4 with 16 GB) or **Linux with an NVIDIA GPU**.
 - **Python 3.10+**.
+- **The [gcloud CLI](https://cloud.google.com/sdk/docs/install)**, only if you rebuild the data from SCIN with `data_parser.py` (see §2).
 - **About 10 GB of free disk space:** roughly 6 GB for the model, plus headroom for swap. On a 16 GB Mac, close memory-heavy apps during a run. If RAM runs short, macOS swaps to disk, and with a nearly full disk that can fail.
 
 ### Steps
@@ -63,6 +64,28 @@ data/
   images/...
 ```
 `data/` is git-ignored, so the data never goes into the repo; share it separately.
+
+### Building the data from SCIN (`data_parser.py`)
+`data_parser.py` builds `data/cases.jsonl` and `data/images/` straight from the public SCIN bucket on Google Cloud Storage:
+1. `load_dataset()` downloads `scin_cases.csv` and `scin_labels.csv` and merges them on `case_id`.
+2. `get_case_ids_with_condition(df, 'Eczema')` picks every case with Eczema anywhere in `weighted_skin_condition_label` (1056 cases).
+3. `export_cases(df, case_ids)` downloads each case's 1–3 images to `data/images/{case_id}_{n}.png`. It then appends one line to `cases.jsonl` in the format below:
+   - `label_confidence` is the highest confidence among the dermatologists who gave Eczema.
+   - `differential` is the weighted label dict.
+   - `context` holds the self-reported answers, made readable (e.g. `AGE_30_TO_39` → `30-39`). Unknown or unspecified answers are left out.
+
+Note that `label` is always `Eczema`, even when Eczema isn't the top-weighted diagnosis; check `differential` for the weights.
+
+The Python packages, including `google-cloud-storage`, are installed by `pip install -r requirements.txt` in setup step 4. You also need to log in to Google Cloud once per machine (needs the [gcloud CLI](https://cloud.google.com/sdk/docs/install)):
+```bash
+gcloud auth application-default login
+```
+Run:
+```bash
+python data_parser.py --limit 5    # small test run
+python data_parser.py              # all 1056 cases
+```
+The export can be resumed. Cases already in `cases.jsonl` are skipped and images already on disk aren't downloaded again, so an interrupted run can simply be restarted. To start over, delete `data/cases.jsonl` and `data/images/`.
 
 `cases.jsonl` holds one JSON object per line. Image paths are relative to the jsonl file:
 ```json
@@ -174,5 +197,6 @@ derm_eval/analyze.py   metrics + plots
 derm_eval/normalize.py free-text diagnosis -> SCIN label
 derm_eval/schema.py    data loading + validation
 scripts/make_sample_data.py   synthetic smoke-test data
+data_parser.py         SCIN (GCS) -> data/cases.jsonl + data/images/ (Eczema cases)
 tests/                 pytest suite (mock model)
 ```
