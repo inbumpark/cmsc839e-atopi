@@ -1,6 +1,6 @@
 # atopi: context vs. MLLM dermatology classification (SCIN)
 
-Runs the four-stage experiment from `CMSC839E_Proposal.pdf` on a local Qwen3-VL through [Ollama](https://ollama.com), then computes the RQ1–RQ3 metrics.
+Runs the four-stage experiment from `CMSC839E_Proposal.pdf` on local vision-language models (Qwen3-VL, MedGemma, Gemma 3) through [Ollama](https://ollama.com), then computes the RQ1–RQ3 metrics. **Results so far: [section 6](#6-results-nov-2026).**
 
 | Stage | Model sees |
 |---|---|
@@ -11,7 +11,8 @@ Runs the four-stage experiment from `CMSC839E_Proposal.pdf` on a local Qwen3-VL 
 
 Each stage runs in two modes:
 - **independent**: every stage is a fresh conversation.
-- **cascade**: stages 2–4 continue the stage-1 conversation (same seed), and the model is asked to reconsider.
+- **cascade**: stages 2–4 each continue the stage-1 conversation (same seed), and the model is asked to reconsider (1→2, 1→3, 1→4).
+- **chains** (optional): 1→2→4 and 1→3→4 continue a finished cascade run; see [Cascade chains](#cascade-chains-124-134).
 
 Every (case, stage, mode) is sampled `n_samples` times (default 5) with different seeds. Agreement across samples is the uncertainty metric.
 
@@ -208,6 +209,127 @@ All settings (model, temperature, seeds, image size, number of samples, the ecze
 | `no space left on device` while pulling | free disk space; leftover blobs in `~/.ollama/models` are reused by the next pull |
 | very slow queries, system lag | memory pressure: close other apps, or use `qwen3-vl:4b-instruct` / a lower `image_max_side` |
 | many `FAILED` lines | check `raw` in `raw.jsonl`; raise `max_retries` or lower `temperature` |
+
+## 6. Results (Nov 2026)
+
+Raw outputs are in `results/` (gitignored); every number below can be regenerated from them with the commands in [How these were run](#how-these-were-run).
+
+### Setup
+- **Data:** the 1056 SCIN cases labelled Eczema (one image each, 1024 px max side). 129 have no context fields at all, so stages 2–4 can't run for them; **all tables use the other 927 cases** (`--exclude-no-context`).
+- **Sampling:** 5 samples per case × path, temperature 0.7, seeds 0–4. Accuracy is per answer, averaged per case; brackets are 95% bootstrap CIs over cases; p-values are paired sign-flip permutation tests over cases.
+- **Models** (Ollama, Q4_K_M, thinking off): Qwen3-VL 8B Instruct, MedGemma 4B, Gemma 3 4B. ⚠️ Google's model card lists SCIN in MedGemma's training data, so MedGemma may have seen these cases; Gemma 3 4B is the clean comparison.
+- **Free-text baseline (Qwen3-VL 8B, `results/default`):** asked for an open diagnosis, the model named eczema in only **1–2%** of answers at every stage and mode (it mostly said "contact dermatitis"), so the task was switched to multiple choice.
+- **Multiple choice (`configs/mcq.yaml`):** 4 options per case: Eczema plus 3 distractors drawn from the other 355 SCIN labels, weighted by how often each label occurs (eczema synonyms and nonspecific "dermatitis" labels excluded). The options are shuffled per case with a fixed seed, so every stage, path, sample and model sees exactly the same 4 options. Chance = 25%. Correct = the model picked Eczema.
+- **Paths:** "new chat" stages are independent conversations. Arrows are one conversation continued turn by turn: 1→2, 1→3 and 1→4 each continue the same stage-1 answer (cascade mode); 1→2→4 and 1→3→4 continue the saved 1→2 / 1→3 conversations with the all-context turn (chain modes). The final turn of 1→2→4 and 1→3→4 is the same prompt as 1→4.
+
+### Accuracy (% of answers that picked Eczema)
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1 image only | 38.9 [36.0, 42.0] | 58.9 [55.6, 62.1] | 58.5 [55.2, 61.6] |
+| 2 random field (new chat) | 42.0 [39.3, 44.5] | 60.2 [57.4, 63.0] | 59.1 [56.4, 61.6] |
+| 3 model-chosen field (new chat) | 44.8 [41.7, 48.0] | 42.2 [39.1, 45.1] | 35.3 [32.2, 38.3] |
+| 4 all context (new chat) | 38.4 [35.3, 41.4] | 54.8 [51.6, 58.0] | 49.1 [45.6, 52.2] |
+| 1→2 | 39.9 [37.4, 42.7] | 60.0 [57.0, 63.0] | 57.9 [54.8, 61.2] |
+| 1→3 | 28.9 [26.3, 31.8] | 60.1 [56.9, 63.1] | 47.1 [44.1, 50.1] |
+| 1→4 | 40.0 [37.0, 43.0] | 61.1 [57.9, 64.1] | 58.8 [55.7, 62.0] |
+| 1→2→4 | 40.8 [38.1, 43.7] | 62.6 [59.6, 65.6] | 59.7 [56.9, 62.7] |
+| 1→3→4 | 35.9 [33.1, 38.7] | 60.4 [57.3, 63.2] | 49.5 [46.4, 52.5] |
+
+Paired differences in accuracy (percentage points):
+
+| comparison | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 2 vs 1 (new chat) | +3.1 (p<0.001) | +1.3 (p=0.14) | +0.6 (p=0.55) |
+| 3 vs 2 (new chat) | +2.8 (p=0.09) | −18.0 (p<0.001) | −23.8 (p<0.001) |
+| 4 vs 1 (new chat) | −0.5 (p=0.77) | −4.1 (p=0.003) | −9.4 (p<0.001) |
+| 1→3 vs 1→2 | −11.0 (p<0.001) | +0.1 (p=0.80) | −10.9 (p<0.001) |
+| 1→4 vs 1 | +1.1 (p=0.42) | +2.2 (p<0.001) | +0.3 (p=0.31) |
+| 1→2→4 vs 1→4 | +0.9 (p=0.17) | +1.5 (p<0.001) | +0.9 (p=0.19) |
+| 1→3→4 vs 1→4 | −4.0 (p<0.001) | −0.7 (p=0.04) | −9.3 (p<0.001) |
+
+### Which context helps, and which the model asks for
+
+Change in accuracy when a field is given at random (stage 2, vs the same sample's image-only answer), and how often the model asks for that field in stage 3 (new chat):
+
+| field | Qwen Δ | MedGemma Δ | Gemma Δ | Qwen asks | MedGemma asks | Gemma asks |
+|---|---|---|---|---|---|---|
+| symptoms | +24.5 | +11.2 | +3.5 | 44% | 0% | 1% |
+| texture | +7.9 | +10.5 | +11.5 | 2% | 3% | 2% |
+| body_location | +5.6 | −2.3 | −0.3 | 5% | 2% | 1% |
+| sex | −1.0 | +6.9 | +7.6 | 0% | 0% | 0% |
+| other_symptoms | −3.9 | +2.3 | +1.7 | 1% | 0% | 0% |
+| age | 0.0 | 0.0 | −0.6 | 1% | 0% | 0% |
+| fitzpatrick | −1.1 | −0.8 | −2.5 | 0% | 1% | 0% |
+| **duration** | **−11.2** | **−15.0** | **−14.5** | 48% | **94%** | **95%** |
+
+### Confidence (self-reported, 1–5)
+
+Mean confidence (and % of answers rated 5):
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1 image only | 4.06 (8%) | 5.00 (100%) | 4.06 (6%) |
+| 2 random field (new chat) | 4.05 (7%) | 4.97 (98%) | 4.04 (5%) |
+| 3 model-chosen field (new chat) | 4.56 (56%) | 5.00 (100%) | 4.00 (0%) |
+| 4 all context (new chat) | 4.03 (4%) | 5.00 (100%) | 4.01 (1%) |
+| 1→2 | 4.49 (51%) | 4.99 (99%) | 4.96 (96%) |
+| 1→3 | 4.84 (85%) | 4.98 (98%) | 4.55 (56%) |
+| 1→4 | 4.64 (66%) | 4.99 (99%) | 4.97 (97%) |
+| 1→2→4 | 4.45 (48%) | 5.00 (100%) | 4.94 (95%) |
+| 1→3→4 | 4.84 (85%) | 4.99 (99%) | 4.97 (97%) |
+
+Does confidence separate right from wrong answers? AUROC of confidence vs correctness (0.5 = no better than chance), with mean confidence when right / wrong:
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1 image only | 0.45 (4.00 / 4.10) | 0.50 (5.00 / 5.00) | 0.43 (4.00 / 4.14) |
+| 2 random field (new chat) | 0.46 (4.00 / 4.08) | 0.49 (4.96 / 4.98) | 0.45 (4.00 / 4.10) |
+| 3 model-chosen field (new chat) | 0.48 (4.54 / 4.58) | 0.50 (5.00 / 4.99) | 0.50 (4.00 / 4.00) |
+| 4 all context (new chat) | 0.49 (4.01 / 4.04) | 0.50 (5.00 / 4.99) | 0.49 (4.00 / 4.02) |
+| 1→2 | 0.49 (4.48 / 4.49) | 0.50 (4.99 / 4.99) | 0.53 (4.99 / 4.92) |
+| 1→3 | 0.52 (4.88 / 4.82) | 0.49 (4.97 / 4.99) | 0.50 (4.55 / 4.54) |
+| 1→4 | 0.53 (4.68 / 4.61) | 0.50 (4.99 / 4.99) | 0.53 (4.99 / 4.94) |
+| 1→2→4 | 0.49 (4.45 / 4.45) | 0.50 (4.99 / 5.00) | 0.52 (4.97 / 4.91) |
+| 1→3→4 | 0.48 (4.82 / 4.86) | 0.50 (4.99 / 4.99) | 0.50 (4.97 / 4.97) |
+
+How often the last turn of a conversation changed the answer (same sample):
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1→2 (vs 1) | 10% | 2% | 2% |
+| 1→3 (vs 1) | 24% | 2% | 17% |
+| 1→4 (vs 1) | 24% | 3% | 2% |
+| 1→2→4 (vs 1→2) | 21% | 4% | 9% |
+| 1→3→4 (vs 1→3) | 15% | 1% | 6% |
+
+### Findings
+1. **Smaller models win on the image alone.** Both 4B models beat Qwen3-VL 8B by about 20 points (58.5–58.9% vs 38.9%). Gemma 3 4B matches MedGemma, so MedGemma's possible exposure to SCIN gives it no visible edge.
+2. **Context barely helps.** A random field adds at most +3 points. All context in a new chat hurts the 4B models (−4.1 MedGemma, −9.4 Gemma). Given to a model that has already answered (1→4), all context changes accuracy by at most +2 points.
+3. **Letting the model choose a field hurts, because it chooses badly.** The 4B models ask for **duration** 94–95% of the time, and duration is the most harmful field (−11 to −15 points when given at random). The useful fields (symptoms, texture) are almost never asked for. Qwen asks for symptoms 44% of the time (+24.5 points when given) and is the only model not hurt in a new chat. In a continued chat, 1→3 still costs Qwen 11 points.
+4. **Order matters a little; a bad stage-3 turn persists.** Seeing a random field before all context (1→2→4) is within 1.5 points of going straight to 1→4. But 1→3→4 stays below 1→4 (−4.0 Qwen, −9.3 Gemma): all context afterwards doesn't undo the damage of the self-chosen field.
+5. **The models mostly stick with their first answer.** MedGemma changes its answer in 1–4% of follow-up turns, so its continued-chat rows mostly repeat its stage-1 answer. Gemma changes 2% at 1→2 and 1→4 but 17% at 1→3, right after its own field choice. Qwen changes most (10–24%).
+6. **Confidence carries no information.** AUROC is 0.43–0.53 for every model and path, and with the image only, Qwen and Gemma are slightly *more* confident when wrong. MedGemma answers 5/5 almost always. Follow-up turns raise confidence without raising accuracy: Gemma goes from 4.06 to about 4.96 once it is asked to reconsider, while its answer changes 2% of the time. Qwen's highest confidence (4.84) is at 1→3, its least accurate path (28.9%).
+7. **Errors and biases.** The most common wrong picks for all three models are Allergic Contact Dermatitis, Insect Bite and Urticaria (acute look-alikes, consistent with duration pushing answers away from eczema). MedGemma rarely picks option D (10% of answers) and gets 20% right when Eczema is D vs 67–76% otherwise; Qwen and Gemma show no strong position bias.
+
+### Caveats
+- **MedGemma and SCIN:** see above; treat MedGemma numbers as possibly contaminated.
+- **Label noise:** SCIN labels come from dermatologists looking at images. Accuracy stays around 40% for Qwen even on cases where the dermatologists put full weight on Eczema, so label noise doesn't explain the low scores.
+- **GPU nondeterminism:** runs were split over RTX 2080 Ti and GTX 1080 Ti cards. Same-GPU-type shards reproduce answers exactly, but about 3% of answers differ between GPU types, and Ollama's prompt cache makes the final chain turn not bit-reproducible. This is noise, too small to move any number above.
+- **Larger models not run:** Qwen3-VL 30B-A3B and MedGemma 27B don't fit in the 11 GB 2080 Ti GPUs available (30B-A3B ran at about 0.5 tokens/s with experts spilled to CPU).
+
+### How these were run
+```bash
+# per model: full MCQ run (stages 1-4, new chat + cascade), then the two chains
+python -m derm_eval.run --config configs/mcq_gemma3_4b.yaml                       # -> results/mcq_gemma3_4b
+python -m derm_eval.run --config configs/mcq_gemma3_4b.yaml --run-name mcq_gemma3_4b_chains \
+    --stages 4 --modes chain_124,chain_134 --history-from results/mcq_gemma3_4b
+python -m derm_eval.analyze results/mcq_gemma3_4b --exclude-no-context
+python -m derm_eval.chains results/mcq_gemma3_4b results/mcq_gemma3_4b_chains --exclude-no-context
+```
+Configs: `configs/mcq.yaml` (Qwen3-VL 8B → `results/mcq`), `configs/mcq_medgemma4b.yaml`, `configs/mcq_gemma3_4b.yaml`. On the cluster each run was split into 4–6 shards (`--shard I/N`, one Ollama server per GPU) and merged with `python -m derm_eval.merge`.
+
+---
 
 ## Code layout
 ```
