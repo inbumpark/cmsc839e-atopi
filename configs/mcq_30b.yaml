@@ -1,0 +1,7 @@
+# Same MCQ experiment as mcq.yaml (same options per case), with the larger Qwen3-VL 30B-A3B
+# (mixture of experts, ~3B active parameters; ~20 GB, so one Ollama server spans 2 x 11 GB GPUs:
+# run with GPUS_PER_SERVER=2 ./submit_sharded.sh ...).
+base: mcq.yaml
+run_name: mcq_30b
+model: qwen3-vl:30b-a3b-instruct
+num_ctx: 4096                        # saves GPU memory; prompts here stay under ~2.5k tokens, so answers are unaffected

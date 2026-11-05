@@ -1,0 +1,13 @@
+# Multiple-choice variant: the model picks the diagnosis from 4 options instead of naming it.
+# Options per case = the case label (Eczema) + 3 distractors drawn from configs/mcq_label_pool.json
+# (every SCIN condition name; rebuild with scripts/make_mcq_pool.py), shuffled. Options are fixed
+# per case, so all stages, modes and samples of a case see the same options in the same order.
+# Accuracy = share of answers that picked the Eczema option (chance = 25%).
+base: default.yaml
+run_name: mcq
+answer_format: mcq                   # free_text (default.yaml) or mcq
+mcq_choices: 4
+mcq_pool_path: configs/mcq_label_pool.json
+mcq_weighting: frequency             # frequency: by SCIN case count (realistic distractors); uniform: over distinct names (mostly rare,
+                                     # oddly worded labels, which makes Eczema stand out)
+mcq_seed: 0                          # changes which distractors are drawn and the option order

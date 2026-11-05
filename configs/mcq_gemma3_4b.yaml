@@ -1,0 +1,7 @@
+# Same MCQ experiment as mcq.yaml (same options per case) with Google's general Gemma 3 4B, the base
+# model MedGemma 4B was built from. Comparing the two isolates the effect of MedGemma's medical
+# training (which, per its model card, included SCIN). ~3.3 GB, fits one GPU.
+base: mcq.yaml
+run_name: mcq_gemma3_4b
+model: gemma3:4b
+think: null                          # Gemma has no thinking mode; don't send the flag

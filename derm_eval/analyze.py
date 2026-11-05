@@ -1,8 +1,11 @@
 """Compute RQ1-RQ3 metrics and plots from a run directory.
 
     python -m derm_eval.analyze results/<run_name> [--labels configs/labels.yaml] [--n-boot 2000]
+                                [--exclude-no-context]
 
-Writes CSV tables, PNG plots and summary.txt to results/<run_name>/analysis/. Grading happens here
+Writes CSV tables, PNG plots and summary.txt to results/<run_name>/analysis/.
+--exclude-no-context drops cases without any context field from every stage (their stages 2-4
+cannot run and would otherwise count as wrong) and writes to results/<run_name>/analysis_with_context/. Grading happens here
 (not at query time), so after extending labels.yaml you can re-run this without re-querying the model.
 Unparseable answers count as incorrect.
 """
@@ -24,6 +27,7 @@ from .schema import load_cases
 from .stages import SHARED
 
 UNPARSED = "UNPARSED"
+NO_CONTEXT = "no context fields"     # error recorded by stages.py when a case has no context
 MODE_COLORS = {"independent": "#2a78d6", "cascade": "#eb6834"}          # categorical slots 1-2
 STAGE_COLORS = {1: "#2a78d6", 2: "#eb6834", 3: "#1baf7a", 4: "#eda100"}  # categorical slots 1-4
 STAGE_NAMES = {1: "1 image only", 2: "2 random field", 3: "3 model-chosen field", 4: "4 all context"}
@@ -44,7 +48,11 @@ def load_run(run_dir, labels_path=None):
     target = cfg.get("target_label", "Eczema")
     df["label"] = df.case_id.map(lambda c: cases[c].label)
     df["label_confidence"] = df.case_id.map(lambda c: cases[c].label_confidence)
-    df["pred"] = [norm(d) if ok else UNPARSED for d, ok in zip(df.diagnosis, df.parse_ok)]
+    if cfg.get("answer_format") == "mcq":
+        # The diagnosis is the exact text of the chosen option, so no free-text matching is needed.
+        df["pred"] = [d if ok else UNPARSED for d, ok in zip(df.diagnosis, df.parse_ok)]
+    else:
+        df["pred"] = [norm(d) if ok else UNPARSED for d, ok in zip(df.diagnosis, df.parse_ok)]
     df["correct"] = df.pred == df.label
     df["in_differential"] = [p == l or p in cases[c].differential for p, l, c in zip(df.pred, df.label, df.case_id)]
     df["pred_target"] = df.pred == target
@@ -271,10 +279,17 @@ def main():
     ap.add_argument("run_dir")
     ap.add_argument("--labels", help="override labels.yaml (default: the one in the run config)")
     ap.add_argument("--n-boot", type=int, default=2000)
+    ap.add_argument("--exclude-no-context", action="store_true",
+                    help="drop cases with no context fields (all stages) -> analysis_with_context/")
     args = ap.parse_args()
 
     df, cfg = load_run(args.run_dir, args.labels)
-    out_dir = Path(args.run_dir) / "analysis"
+    note = ""
+    if args.exclude_no_context:
+        no_ctx = set(df.case_id[df.error == NO_CONTEXT])
+        df = df[~df.case_id.isin(no_ctx)].reset_index(drop=True)
+        note = f"   (excluded {len(no_ctx)} cases with no context fields)"
+    out_dir = Path(args.run_dir) / ("analysis_with_context" if args.exclude_no_context else "analysis")
     out_dir.mkdir(exist_ok=True)
     target = cfg.get("target_label", "Eczema")
 
@@ -300,7 +315,7 @@ def main():
     maj.to_csv(out_dir / "majority_votes.csv", index=False)
     unmatched.to_csv(out_dir / "unmatched_diagnoses.csv", index=False)
     lines = [f"run: {args.run_dir}   model: {cfg['model']}   samples/case: {cfg['n_samples']}   "
-             f"cases: {df.case_id.nunique()}   answers: {len(df)}", ""]
+             f"cases: {df.case_id.nunique()}   answers: {len(df)}{note}", ""]
     with pd.option_context("display.width", 200, "display.max_columns", 50, "display.float_format", "{:.3f}".format):
         for name, t in tables.items():
             t.to_csv(out_dir / f"{name}.csv", index=False)

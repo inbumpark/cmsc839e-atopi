@@ -24,6 +24,7 @@ max_cases: null                      # null = all cases
 stages: [1, 2, 3, 4]
 modes: [independent, cascade]        # independent: fresh chat per stage; cascade: stages 2-4 continue the stage-1 chat
 target_label: Eczema                 # positive class for the binary eczema metrics
+answer_format: free_text             # free_text: model names the condition; mcq: pick from options (see configs/mcq.yaml)
 
 # Context fields the model may see. key -> how the field is described to the model.
 # Keys must match the keys in each case's "context" object.

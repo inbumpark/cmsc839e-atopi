@@ -1,0 +1,8 @@
+# Same MCQ experiment as mcq.yaml (same options per case) with Google's MedGemma 27b (multimodal).
+# CAUTION: MedGemma's model card lists SCIN among its training datasets, so it may have seen these
+# images and labels; treat its accuracy here as an optimistic, possibly contaminated upper bound.
+base: mcq.yaml
+run_name: mcq_medgemma27b
+model: medgemma:27b
+think: null                          # Gemma has no thinking mode; don't send the flag
+num_ctx: 4096                        # ~17 GB model spans 2 x 11 GB GPUs (GPUS_PER_SERVER=2); prompts fit easily

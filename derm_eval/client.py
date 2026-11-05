@@ -40,6 +40,11 @@ def parse_json(text):
     return None
 
 
+
+class GenerationAborted(Exception):
+    """Ollama aborted the generation (e.g. token repeat limit); treated like unparseable output."""
+
+
 class OllamaClient:
     def __init__(self, cfg):
         import ollama
@@ -69,6 +74,10 @@ class OllamaClient:
                 self.think = None
                 kwargs.pop("think")
                 resp = self.client.chat(**kwargs)
+            elif "prediction aborted" in str(e).lower():
+                # Ollama stops a generation stuck in a loop ("token repeat limit reached"): that is a
+                # bad answer from the model, not a server failure, so the caller retries / records it.
+                raise GenerationAborted(str(e)) from e
             else:
                 raise
         return resp.message.content, time.time() - t0

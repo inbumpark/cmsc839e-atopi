@@ -105,3 +105,87 @@ def cascade_select_prompt(keys, field_names):
 def cascade_update_prompt(context, keys, field_names):
     return CASCADE_UPDATE_PROMPT.format(context=render_context(context, keys, field_names)) \
         + "\n\n" + ANSWER_FORMAT
+
+
+# ---- multiple-choice (answer_format: mcq) --------------------------------------------------
+# Same framing as BASE_PROMPT, but the model picks one of the listed conditions by letter.
+MCQ_BASE_PROMPT = (
+    "You are a skilled dermatologist with multiple years of experience observing patients "
+    "with a variety of skin conditions. Here {intro} from a patient who has come to you to "
+    "determine which skin condition they have. Choose the skin condition from the options "
+    "below, give your reason for the choice in a few words, then your confidence score of the "
+    "diagnosis on a scale of 1 to 5."
+)
+MCQ_SELECT_PROMPT = (
+    "You are a skilled dermatologist with multiple years of experience observing patients "
+    "with a variety of skin conditions. Here {intro} from a patient who has come to you to "
+    "determine which skin condition they have. The diagnosis is one of these options:\n{options}\n"
+    "Before giving your diagnosis, you may ask the patient about exactly ONE of the following "
+    "pieces of information. Choose the one that would be most useful for your diagnosis.\n{menu}\n"
+    'Respond only with JSON of the form {{"requested_field": "<one of the keys above>", '
+    '"why": "<a few words>"}}.'
+)
+MCQ_CASCADE_UPDATE_PROMPT = (
+    "Additional information from the patient:\n{context}\n"
+    "Taking this into account, choose the skin condition again from the same options, give "
+    "your reason for the choice in a few words, then your confidence score of the diagnosis "
+    "on a scale of 1 to 5."
+)
+MCQ_ANSWER_TO_REQUEST_PROMPT = (
+    "The patient answers:\n{context}\n"
+    "Now choose the skin condition from the options, give your reason for the choice in a few "
+    "words, then your confidence score of the diagnosis on a scale of 1 to 5."
+)
+
+
+def render_options(options):
+    return "\n".join(f"{letter}. {name}" for letter, name in zip(mcq_letters(len(options)), options))
+
+
+def mcq_letters(n):
+    return [chr(ord("A") + i) for i in range(n)]
+
+
+def mcq_answer_format(options):
+    ls = mcq_letters(len(options))
+    choices = ", ".join(ls[:-1]) + f" or {ls[-1]}"
+    return ('Respond only with JSON of the form {"answer": "<' + choices + '>", '
+            '"reason": "<a few words>", "confidence": <integer 1-5>}.')
+
+
+def mcq_schema(options):
+    return {
+        "type": "object",
+        "properties": {
+            "answer": {"type": "string", "enum": mcq_letters(len(options))},
+            "reason": {"type": "string"},
+            "confidence": {"type": "integer", "minimum": 1, "maximum": 5},
+        },
+        "required": ["answer", "reason", "confidence"],
+    }
+
+
+def _options_block(options):
+    return "\n\nOptions:\n" + render_options(options) + "\n\n" + mcq_answer_format(options)
+
+
+def mcq_diagnosis_prompt(n_images, context, keys, field_names, options):
+    text = MCQ_BASE_PROMPT.format(intro=intro(n_images, bool(keys)))
+    if keys:
+        text += "\n\nPatient context:\n" + render_context(context, keys, field_names)
+    return text + _options_block(options)
+
+
+def mcq_select_prompt(n_images, keys, field_names, options):
+    return MCQ_SELECT_PROMPT.format(intro=intro(n_images, False), options=render_options(options),
+                                    menu=render_menu(keys, field_names))
+
+
+def mcq_answer_to_request_prompt(context, key, field_names, options):
+    return MCQ_ANSWER_TO_REQUEST_PROMPT.format(
+        context=render_context(context, [key], field_names)) + _options_block(options)
+
+
+def mcq_cascade_update_prompt(context, keys, field_names, options):
+    return MCQ_CASCADE_UPDATE_PROMPT.format(
+        context=render_context(context, keys, field_names)) + _options_block(options)

@@ -139,11 +139,35 @@ python -m derm_eval.analyze results/default
 | `--max-cases N` | first N cases only |
 | `--n-samples K` | samples per (case, stage, mode); default 5 |
 | `--stages 1,2,3,4` | subset of stages |
-| `--modes independent,cascade` | subset of modes |
+| `--modes independent,cascade` | subset of modes (also `chain_124`, `chain_134`; see "Cascade chains" below) |
+| `--shard I/N` | run only shard I of N (0-based); see "Splitting a run across GPUs" below |
+| `--ollama-host URL` | use this Ollama server instead of `ollama_host` from the config |
+| `--history-from RUN_DIR` | finished run whose cascade conversations `chain_*` modes continue |
 
 - **Cost:** each case needs `n_samples × (1 + 3 × #modes)` = 35 answers with the defaults (stage 3 makes 2 calls). Each line of the progress output shows the latency and an ETA; multiply the pilot's per-query time to estimate the full run.
 - **Resuming:** if a run is interrupted (Ctrl-C, sleep, crash), re-run the *same* command; finished queries are skipped. The runner refuses to mix results if you change the model/temperature/seed settings under an existing run name.
 - **Keeping the Mac awake:** for long runs, wrap the command in `caffeinate -i` so the Mac doesn't sleep.
+
+### Splitting a run across GPUs
+With several GPUs, run one Ollama server per GPU and one shard per server. `--shard I/N` takes every N-th case starting at case I and writes to `results/<run>/shards/<I>of<N>/`. Each shard resumes on its own. When all shards are done, merge them and analyze as usual:
+```bash
+# e.g. two GPUs, each with its own Ollama server
+python -m derm_eval.run --run-name big --shard 0/2 --ollama-host http://127.0.0.1:11434 &
+python -m derm_eval.run --run-name big --shard 1/2 --ollama-host http://127.0.0.1:11435 &
+wait
+python -m derm_eval.merge results/big      # checks all shards match and are complete
+python -m derm_eval.analyze results/big
+```
+`merge` refuses shards run with different settings, and it lists planned queries that are missing; finish those shards or pass `--allow-incomplete`. You can re-run it safely.
+
+### Cascade chains (1→2→4, 1→3→4)
+Cascade mode already branches 1→2, 1→3 and 1→4 from the same stage-1 chat. The `chain_124` and `chain_134` modes (stage 4 only) continue the finished 1→2 / 1→3 chats of an earlier run with the stage-4 turn (all context, same prompt as 1→4). The earlier chats are rebuilt exactly from that run's records, so only the final turn is queried (2 × n_samples answers per case):
+```bash
+python -m derm_eval.run --config configs/mcq.yaml --run-name mcq_chains --stages 4 \
+    --modes chain_124,chain_134 --history-from results/mcq
+python -m derm_eval.chains results/mcq results/mcq_chains --exclude-no-context
+```
+`chains` writes accuracy for 1, 1→2, 1→3, 1→4, 1→2→4, 1→3→4 (and fresh-chat stage 4), plus paired differences, to `results/mcq_chains/analysis_with_context/`. The history run must use the same model and settings (checked at start).
 
 All settings (model, temperature, seeds, image size, number of samples, the eczema target label, context fields) are in `configs/default.yaml`. To make a variant, create a new YAML with `base: default.yaml` and only the keys you change (see `configs/smoke.yaml`).
 
@@ -196,6 +220,9 @@ derm_eval/run.py       resumable runner
 derm_eval/analyze.py   metrics + plots
 derm_eval/normalize.py free-text diagnosis -> SCIN label
 derm_eval/schema.py    data loading + validation
+derm_eval/merge.py     combine --shard outputs into one run
+derm_eval/chains.py    compare cascade paths 1->2->4 / 1->3->4 against 1->2, 1->3, 1->4
+derm_eval/mcq.py       multiple-choice options (Eczema + sampled distractors)
 scripts/make_sample_data.py   synthetic smoke-test data
 data_parser.py         SCIN (GCS) -> data/cases.jsonl + data/images/ (Eczema cases)
 tests/                 pytest suite (mock model)

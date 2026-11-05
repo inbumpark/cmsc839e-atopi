@@ -1,0 +1,8 @@
+# Same MCQ experiment as mcq.yaml (same options per case) with Google's MedGemma 4b (multimodal).
+# ~3.3 GB, fits one GPU.
+# CAUTION: MedGemma's model card lists SCIN among its training datasets, so it may have seen these
+# images and labels; treat its accuracy here as an optimistic, possibly contaminated upper bound.
+base: mcq.yaml
+run_name: mcq_medgemma4b
+model: medgemma:4b
+think: null                          # Gemma has no thinking mode; don't send the flag
