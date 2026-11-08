@@ -343,3 +343,46 @@ def test_plan_tasks_chains_are_stage4_only():
     cfg = {**CFG, "stages": [2, 3, 4], "modes": ["chain_124", "chain_134"], "n_samples": 2}
     tasks = plan_tasks([CASE], cfg)
     assert sorted((s, m) for _, _, s, m in tasks) == sorted([(4, "chain_124"), (4, "chain_134")] * 2)
+
+
+# ---- fixed distractors and certain-label filter --------------------------------------------------
+def test_fixed_distractors_same_set_shuffled_per_case():
+    fixed = ["Acne", "Rosacea", "Herpes Zoster"]
+    sets, orders = set(), set()
+    for cid in ("a", "b", "c", "d", "e", "f"):
+        o = build_options(cid, "Eczema", POOL, 4, seed=0, fixed=fixed)
+        sets.add(frozenset(o)); orders.add(tuple(o))
+        assert o == build_options(cid, "Eczema", POOL, 4, seed=0, fixed=fixed)   # deterministic
+    assert sets == {frozenset(fixed + ["Eczema"])} and len(orders) > 1
+    with pytest.raises(ValueError, match="not in the SCIN label pool"):
+        build_options("a", "Eczema", POOL, 4, fixed=["Acne", "Rosacea", "Typo"])
+    with pytest.raises(ValueError, match="distinct"):
+        build_options("a", "Eczema", POOL, 4, fixed=["Acne", "Rosacea"])
+
+
+def test_random_distractors_unchanged_by_fixed_option():
+    # adding `fixed` must not change options of earlier random-distractor runs
+    import random
+    o = build_options("c1", "Eczema", POOL, 4, seed=0, weighting="uniform")
+    rng = random.Random("mcq:0:c1")
+    d = rng.sample([n for n in POOL if n != "Eczema"], 3) + ["Eczema"]
+    rng.shuffle(d)
+    assert o == d
+
+
+def test_far_config_and_stage_options():
+    cfg = load_config(resolve("configs/mcq_far.yaml"))
+    assert cfg["mcq_distractors"] == ["Acne", "Rosacea", "Herpes Zoster"] and cfg["min_label_weight"] == 1.0
+    r = StageRunner(MockClient(), {**cfg, "max_retries": 0})
+    assert sorted(r.options(CASE)) == sorted(["Acne", "Rosacea", "Herpes Zoster", "Eczema"])
+
+
+def test_select_cases_min_label_weight():
+    from derm_eval.schema import select_cases
+    mk = lambda i, w: Case(case_id=str(i), images=["/x.png"], label="Eczema",
+                           differential={"Eczema": w, **({"Psoriasis": 1 - w} if w < 1 else {})})
+    cases = [mk(0, 1.0), mk(1, 0.5), mk(2, 0.67), mk(3, 1.0), mk(4, 0.18)]
+    assert [c.case_id for c in select_cases(cases, {})] == ["0", "1", "2", "3", "4"]
+    assert [c.case_id for c in select_cases(cases, {"min_label_weight": 1.0})] == ["0", "3"]
+    assert [c.case_id for c in select_cases(cases, {"min_label_weight": 0.6})] == ["0", "2", "3"]
+    assert [c.case_id for c in select_cases(cases, {"min_label_weight": 1.0, "max_cases": 1})] == ["0"]

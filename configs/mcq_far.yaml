@@ -1,0 +1,10 @@
+# MCQ with fixed, easy-to-tell-apart distractors, on cases where Eczema is certain.
+# Distractors: the 3 SCIN conditions dermatologists least often list together with Eczema
+# (share of cases with that condition whose differential also lists Eczema; >= 30 cases each):
+#   Acne 4.1%, Rosacea 5.8%, Herpes Zoster 8.5%  (scripts/rank_mcq_distractors.py)
+# Every case gets these same 3 distractors + Eczema; only the option order is shuffled per case.
+# Cases: only those whose differential is 100% Eczema (127 of the 1056 cases, 104 with context).
+base: mcq.yaml
+run_name: mcq_far
+mcq_distractors: [Acne, Rosacea, Herpes Zoster]
+min_label_weight: 1.0                # keep cases whose label weight >= this (1.0 = every dermatologist said only Eczema)

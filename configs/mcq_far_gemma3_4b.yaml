@@ -1,0 +1,5 @@
+# mcq_far.yaml with Gemma 3 4B.
+base: mcq_far.yaml
+run_name: mcq_far_gemma3_4b
+model: gemma3:4b
+think: null                          # Gemma has no thinking mode; don't send the flag

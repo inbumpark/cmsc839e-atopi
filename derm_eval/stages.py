@@ -90,6 +90,7 @@ class StageRunner:
             self.n_choices = cfg.get("mcq_choices", 4)
             self.mcq_seed = cfg.get("mcq_seed", 0)
             self.mcq_weighting = cfg.get("mcq_weighting", "uniform")
+            self.mcq_distractors = cfg.get("mcq_distractors")
             self._options = {}
 
     # ---- helpers -------------------------------------------------------------------------
@@ -105,7 +106,8 @@ class StageRunner:
         """MCQ options for this case (same in every stage, mode and sample)."""
         if case.case_id not in self._options:
             self._options[case.case_id] = build_options(case.case_id, case.label, self.pool, self.n_choices,
-                                                        self.mcq_seed, self.mcq_weighting)
+                                                        self.mcq_seed, self.mcq_weighting,
+                                                        fixed=self.mcq_distractors)
         return self._options[case.case_id]
 
     def _answer_spec(self, case):

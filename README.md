@@ -318,6 +318,107 @@ How often the last turn of a conversation changed the answer (same sample):
 - **GPU nondeterminism:** runs were split over RTX 2080 Ti and GTX 1080 Ti cards. Same-GPU-type shards reproduce answers exactly, but about 3% of answers differ between GPU types, and Ollama's prompt cache makes the final chain turn not bit-reproducible. This is noise, too small to move any number above.
 - **Larger models not run:** Qwen3-VL 30B-A3B and MedGemma 27B don't fit in the 11 GB 2080 Ti GPUs available (30B-A3B ran at about 0.5 tokens/s with experts spilled to CPU).
 
+### Rerun: far distractors, certain-Eczema cases (`configs/mcq_far*.yaml`)
+
+The random distractors above are often conditions dermatologists confuse with eczema, and many "Eczema" cases are only partly Eczema in SCIN's differential (one has weight 0.18). This rerun changes two things and repeats every test:
+- **Fixed far distractors:** every case gets the same 3 wrong options, **Acne, Rosacea and Herpes Zoster** (shuffled with Eczema per case). They are the SCIN conditions that dermatologists least often list in the same differential as Eczema: only 4.1%, 5.8% and 8.5% of the cases with each condition also list Eczema (among labels with ≥30 cases; `python scripts/rank_mcq_distractors.py`). Correlation of the differential weights was not used because it mostly reflects how common a label is: it ranks Insect Bite and Urticaria as least related although they share a differential with Eczema in about 21% of cases.
+- **Certain cases only:** `min_label_weight: 1.0` keeps the cases whose differential is 100% Eczema, i.e. every dermatologist said only Eczema: **127 of the 1056 cases, 104 with context**. Tables use those 104. With 104 cases the 95% CIs are about ±8 points (vs ±3 above).
+
+Config keys (any MCQ config): `mcq_distractors: [A, B, C]` fixes the distractors (must be SCIN labels, not the target); `min_label_weight: W` keeps only cases whose label weight in the differential is ≥ W (e.g. 0.67 keeps 186 cases with context).
+
+Accuracy (% of answers that picked Eczema) [95% CI]:
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1 image only | 46.0 [36.7, 55.4] | 86.2 [79.4, 92.3] | 81.7 [74.0, 88.5] |
+| 2 random field (new chat) | 56.9 [48.7, 65.2] | 87.3 [81.9, 91.9] | 81.7 [75.4, 87.3] |
+| 3 model-chosen field (new chat) | 74.6 [66.9, 82.5] | 64.0 [54.8, 72.5] | 48.7 [39.6, 57.7] |
+| 4 all context (new chat) | 73.5 [64.8, 81.2] | 87.5 [80.8, 93.3] | 76.9 [69.2, 84.6] |
+| 1→2 | 55.0 [46.9, 63.3] | 87.3 [81.2, 92.9] | 81.5 [74.0, 88.5] |
+| 1→3 | 37.5 [29.0, 46.2] | 85.4 [78.7, 91.5] | 77.7 [69.8, 85.2] |
+| 1→4 | 71.5 [63.5, 79.6] | 88.5 [82.1, 94.0] | 82.7 [76.0, 89.4] |
+| 1→2→4 | 72.7 [65.2, 80.0] | 88.5 [82.9, 93.7] | 84.0 [77.3, 90.2] |
+| 1→3→4 | 65.8 [56.9, 74.4] | 85.4 [78.3, 91.9] | 81.0 [73.8, 88.3] |
+
+Which change made the difference? Accuracy per path for the random-distractor runs on all 927 cases → the same runs restricted to the 104 certain cases → the far-distractor runs on those 104 cases:
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1 image only | 38.9 → 37.9 → 46.0 | 58.9 → 70.6 → 86.2 | 58.5 → 62.5 → 81.7 |
+| 2 random field (new chat) | 42.0 → 42.9 → 56.9 | 60.2 → 73.7 → 87.3 | 59.1 → 65.0 → 81.7 |
+| 3 model-chosen field (new chat) | 44.8 → 44.8 → 74.6 | 42.2 → 43.3 → 64.0 | 35.3 → 38.5 → 48.7 |
+| 4 all context (new chat) | 38.4 → 40.8 → 73.5 | 54.8 → 68.3 → 87.5 | 49.1 → 58.7 → 76.9 |
+| 1→2 | 39.9 → 38.8 → 55.0 | 60.0 → 71.0 → 87.3 | 57.9 → 61.9 → 81.5 |
+| 1→3 | 28.9 → 23.7 → 37.5 | 60.1 → 71.3 → 85.4 | 47.1 → 51.5 → 77.7 |
+| 1→4 | 40.0 → 41.2 → 71.5 | 61.1 → 72.3 → 88.5 | 58.8 → 62.7 → 82.7 |
+| 1→2→4 | 40.8 → 41.2 → 72.7 | 62.6 → 72.7 → 88.5 | 59.7 → 63.8 → 84.0 |
+| 1→3→4 | 35.9 → 33.5 → 65.8 | 60.4 → 71.3 → 85.4 | 49.5 → 53.8 → 81.0 |
+
+Paired differences in accuracy (percentage points):
+
+| comparison | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 2 vs 1 (new chat) | +11.0 (p<0.001) | +1.2 (p=0.68) | +0.0 (p=1.00) |
+| 3 vs 2 (new chat) | +17.7 (p<0.001) | −23.3 (p<0.001) | −33.1 (p<0.001) |
+| 4 vs 1 (new chat) | +27.5 (p<0.001) | +1.3 (p=0.79) | −4.8 (p=0.42) |
+| 1→3 vs 1→2 | −17.5 (p<0.001) | −1.9 (p=0.08) | −3.8 (p=0.02) |
+| 1→4 vs 1 | +25.6 (p<0.001) | +2.3 (p=0.25) | +1.0 (p=1.00) |
+| 1→2→4 vs 1→4 | +1.2 (p=0.66) | +0.0 (p=1.00) | +1.3 (p=0.33) |
+| 1→3→4 vs 1→4 | −5.8 (p=0.03) | −3.1 (p=0.06) | −1.7 (p=0.46) |
+
+Change in accuracy when a field is given at random (stage 2 vs the same sample's stage 1; n = answers) and how often the model asks for it in stage 3 (new chat):
+
+| field | Qwen Δ | MedGemma Δ | Gemma Δ | Qwen asks | MedGemma asks | Gemma asks |
+|---|---|---|---|---|---|---|
+| symptoms (n=73) | **+42.5** | +2.7 | +8.2 | 66% | 0% | 2% |
+| texture (n=107) | +9.3 | +8.4 | +5.6 | 0% | 2% | 2% |
+| body_location (n=104) | +19.2 | +3.8 | −2.9 | 10% | 4% | 3% |
+| other_symptoms (n=64) | 0.0 | +1.6 | +7.8 | 1% | 0% | 0% |
+| sex (n=37) | +2.7 | −5.4 | −2.7 | 0% | 0% | 1% |
+| age (n=29) | −6.9 | +6.9 | −3.4 | 2% | 0% | 0% |
+| fitzpatrick (n=25) | −8.0 | 0.0 | −16.0 | 1% | 3% | 0% |
+| **duration** (n=81) | −1.2 | **−12.3** | **−9.9** | 21% | **91%** | **92%** |
+
+In a continued chat (1→3) the choice changes for Qwen: it asks for duration 83% of the time (symptoms 5%). MedGemma and Gemma ask for duration about 90% of the time in both modes.
+
+Mean confidence (% rated 5):
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1 image only | 4.06 (7%) | 5.00 (100%) | 4.05 (5%) |
+| 2 random field (new chat) | 4.02 (4%) | 4.98 (99%) | 4.04 (4%) |
+| 3 model-chosen field (new chat) | 4.65 (65%) | 4.99 (100%) | 4.03 (3%) |
+| 4 all context (new chat) | 4.02 (2%) | 4.99 (99%) | 4.03 (3%) |
+| 1→2 | 4.51 (54%) | 4.99 (99%) | 4.99 (99%) |
+| 1→3 | 4.68 (72%) | 5.00 (100%) | 4.58 (59%) |
+| 1→4 | 4.59 (62%) | 4.99 (99%) | 5.00 (100%) |
+| 1→2→4 | 4.44 (46%) | 5.00 (100%) | 4.98 (98%) |
+| 1→3→4 | 4.76 (76%) | 5.00 (100%) | 5.00 (100%) |
+
+AUROC of confidence vs correctness (mean confidence right / wrong):
+
+| path | Qwen3-VL 8B | MedGemma 4B | Gemma 3 4B |
+|---|---|---|---|
+| 1 image only | 0.43 (3.99 / 4.12) | 0.51 (5.00 / 4.99) | 0.36 (4.00 / 4.27) |
+| 2 random field (new chat) | 0.48 (4.00 / 4.04) | 0.49 (4.98 / 5.00) | 0.42 (4.01 / 4.17) |
+| 3 model-chosen field (new chat) | 0.58 (4.70 / 4.53) | 0.50 (5.00 / 4.99) | 0.48 (4.00 / 4.05) |
+| 4 all context (new chat) | 0.50 (4.01 / 4.02) | 0.51 (5.00 / 4.97) | 0.44 (4.00 / 4.12) |
+| 1→2 | 0.56 (4.58 / 4.44) | 0.51 (4.99 / 4.97) | 0.53 (5.00 / 4.94) |
+| 1→3 | 0.59 (4.83 / 4.60) | 0.50 (5.00 / 5.00) | 0.40 (4.54 / 4.73) |
+| 1→4 | 0.60 (4.67 / 4.39) | 0.50 (4.99 / 5.00) | 0.51 (5.00 / 4.99) |
+| 1→2→4 | 0.56 (4.48 / 4.34) | 0.50 (5.00 / 5.00) | 0.52 (4.99 / 4.94) |
+| 1→3→4 | 0.48 (4.75 / 4.78) | 0.50 (5.00 / 5.00) | 0.50 (5.00 / 5.00) |
+
+How often the last turn changed the answer: Qwen 13% (1→2), 32% (1→3), 32% (1→4), 27% (1→2→4), 34% (1→3→4); MedGemma 0–4%; Gemma 1–5%.
+
+Findings of the rerun:
+1. **With easy distractors, context clearly helps Qwen.** All context adds +27.5 (new chat) and +25.6 (1→4) points; above it added about 0. Symptoms alone add +42.5 and body location +19.2. Against look-alike distractors these fields can't separate eczema; against Acne, Rosacea and Herpes Zoster they can.
+2. **The 4B models are near their ceiling from the image alone** (MedGemma 86%, Gemma 82%), and context adds nothing significant for them. Most of their gain over the first runs comes from the distractors (Gemma 62.5 → 81.7 on the same cases), part from the certain-case filter (MedGemma 58.9 → 70.6). For Qwen the filter alone changes nothing (38.9 → 37.9).
+3. **Choosing a field in a new chat still costs the 4B models 23–33 points.** They still ask for duration about 91% of the time, which still hurts them (−12 and −10 when given at random). Qwen benefits in a new chat (+17.7 vs a random field) because it asks for symptoms 66% of the time; after its own first answer it asks for duration instead, and 1→3 drops below image-only (37.5% vs 46.0%).
+4. **Order:** 1→2→4 is again within about 1 point of 1→4; 1→3→4 is again lower (−5.8 for Qwen, p=0.03; −3.1 MedGemma and −1.7 Gemma, not significant).
+5. **Confidence is still uninformative** (AUROC 0.36–0.60). MedGemma rates nearly every answer 5; Gemma's image-only confidence is higher when it is wrong (AUROC 0.36). Follow-up turns again push Gemma to 5/5 (5% → 99–100%) while it changes its answer in 1–5% of turns.
+6. **Errors:** the most common wrong picks are Acne (Qwen 19% of answers, Gemma 12%) and Herpes Zoster (10–15%); Rosacea is almost never picked. MedGemma still avoids option D (69% right when Eczema is D vs about 90% otherwise).
+
 ### How these were run
 ```bash
 # per model: full MCQ run (stages 1-4, new chat + cascade), then the two chains
@@ -327,7 +428,9 @@ python -m derm_eval.run --config configs/mcq_gemma3_4b.yaml --run-name mcq_gemma
 python -m derm_eval.analyze results/mcq_gemma3_4b --exclude-no-context
 python -m derm_eval.chains results/mcq_gemma3_4b results/mcq_gemma3_4b_chains --exclude-no-context
 ```
-Configs: `configs/mcq.yaml` (Qwen3-VL 8B → `results/mcq`), `configs/mcq_medgemma4b.yaml`, `configs/mcq_gemma3_4b.yaml`. On the cluster each run was split into 4–6 shards (`--shard I/N`, one Ollama server per GPU) and merged with `python -m derm_eval.merge`.
+Configs: `configs/mcq.yaml` (Qwen3-VL 8B → `results/mcq`), `configs/mcq_medgemma4b.yaml`, `configs/mcq_gemma3_4b.yaml`. The rerun uses `configs/mcq_far.yaml`, `configs/mcq_far_medgemma4b.yaml` and `configs/mcq_far_gemma3_4b.yaml` the same way (→ `results/mcq_far*`).
+
+The markdown tables in this section are printed by `python scripts/results_tables.py` (random distractors) and `python scripts/results_tables.py --set far`. On the cluster each run was split into 4–6 shards (`--shard I/N`, one Ollama server per GPU) and merged with `python -m derm_eval.merge`.
 
 ---
 
@@ -344,8 +447,10 @@ derm_eval/normalize.py free-text diagnosis -> SCIN label
 derm_eval/schema.py    data loading + validation
 derm_eval/merge.py     combine --shard outputs into one run
 derm_eval/chains.py    compare cascade paths 1->2->4 / 1->3->4 against 1->2, 1->3, 1->4
-derm_eval/mcq.py       multiple-choice options (Eczema + sampled distractors)
+derm_eval/mcq.py       multiple-choice options (Eczema + sampled or fixed distractors)
 scripts/make_sample_data.py   synthetic smoke-test data
+scripts/rank_mcq_distractors.py  rank SCIN labels by how rarely they co-occur with Eczema
+scripts/results_tables.py     print the README results tables
 data_parser.py         SCIN (GCS) -> data/cases.jsonl + data/images/ (Eczema cases)
 tests/                 pytest suite (mock model)
 ```

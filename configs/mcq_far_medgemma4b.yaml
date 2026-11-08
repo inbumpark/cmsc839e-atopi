@@ -1,0 +1,5 @@
+# mcq_far.yaml with MedGemma 4B. CAUTION: MedGemma's training data includes SCIN (see mcq_medgemma4b.yaml).
+base: mcq_far.yaml
+run_name: mcq_far_medgemma4b
+model: medgemma:4b
+think: null                          # Gemma has no thinking mode; don't send the flag

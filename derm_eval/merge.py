@@ -16,12 +16,13 @@ import yaml
 
 from .config import resolve
 from .run import load_done, plan_tasks, record_key, shard_cases
-from .schema import load_cases
+from .schema import load_cases, select_cases
 
 # Settings that must match across shards for their answers to be comparable.
 MUST_MATCH = ("model", "temperature", "base_seed", "think", "image_max_side", "images_per_case",
               "num_ctx", "n_samples", "stages", "modes", "data_path", "max_cases", "context_fields",
-              "answer_format", "mcq_choices", "mcq_seed", "mcq_weighting", "mcq_pool_path", "history_from")
+              "answer_format", "mcq_choices", "mcq_seed", "mcq_weighting", "mcq_pool_path", "history_from",
+              "mcq_distractors", "min_label_weight")
 
 
 def find_shards(run_dir):
@@ -53,7 +54,7 @@ def merge(run_dir, allow_incomplete=False):
         if diff:
             raise SystemExit(f"shard {i} differs from shard 0 in {diff}; refusing to mix results")
 
-    cases = load_cases(resolve(base["data_path"]), base.get("max_cases"))
+    cases = select_cases(load_cases(resolve(base["data_path"])), base)
     raw_path = run_dir / "raw.jsonl"
     merged = load_done(raw_path)          # keep anything already merged or run unsharded
     n_missing = 0

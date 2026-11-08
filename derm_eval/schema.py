@@ -64,6 +64,21 @@ def load_cases(path, max_cases=None):
     return cases
 
 
+def label_weight(case):
+    """Dermatologist weight of the case's own label in its differential (0 if not listed)."""
+    return float(case.differential.get(case.label, 0.0))
+
+
+def select_cases(cases, cfg):
+    """Cases a run uses: label weight >= min_label_weight (if set), then the first max_cases."""
+    w = cfg.get("min_label_weight")
+    if w is not None:
+        cases = [c for c in cases if label_weight(c) >= float(w) - 1e-9]
+    if cfg.get("max_cases"):
+        cases = cases[: cfg["max_cases"]]
+    return cases
+
+
 def validate(cases, field_order, known_labels):
     """Return (errors, warnings) as lists of strings."""
     errors, warnings = [], []

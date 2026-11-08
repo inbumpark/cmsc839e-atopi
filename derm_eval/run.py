@@ -25,14 +25,15 @@ import yaml
 
 from .client import OllamaClient
 from .config import load_config, resolve
-from .schema import load_cases
+from .schema import load_cases, select_cases
 from .stages import CHAINS, SHARED, StageRunner
 
 
 # Settings that must not change when resuming a run (absent keys fall back to KEY_DEFAULTS, so
 # runs made before a setting existed still resume).
 RESUME_MUST_MATCH = ("model", "temperature", "base_seed", "think", "image_max_side", "images_per_case",
-                     "answer_format", "mcq_choices", "mcq_seed", "mcq_weighting", "mcq_pool_path")
+                     "answer_format", "mcq_choices", "mcq_seed", "mcq_weighting", "mcq_pool_path",
+                     "mcq_distractors", "min_label_weight")
 KEY_DEFAULTS = {"answer_format": "free_text"}
 
 
@@ -144,7 +145,7 @@ def main():
     if chains and not cfg.get("history_from"):
         raise SystemExit(f"modes {chains} continue an earlier run's cascades; pass --history-from RUN_DIR")
 
-    cases = load_cases(resolve(cfg["data_path"]), cfg.get("max_cases"))
+    cases = select_cases(load_cases(resolve(cfg["data_path"])), cfg)
     out_dir = resolve(cfg["results_dir"]) / cfg["run_name"]
     if args.shard:
         i, n = parse_shard(args.shard)
