@@ -1,0 +1,36 @@
+run_name: conf_gemma3_4b
+data_path: data/cases.jsonl
+labels_path: configs/labels.yaml
+results_dir: results
+model: gemma3:4b
+think: null
+num_ctx: 8192
+keep_alive: 30m
+image_max_side: 1024
+images_per_case: 1
+n_samples: 5
+base_seed: 0
+temperature: 0.7
+max_retries: 2
+max_cases: null
+stages:
+- 1
+- 2
+- 3
+- 4
+modes:
+- cascade
+- chain_124
+- chain_134
+target_label: Eczema
+answer_format: confidence
+context_fields:
+  duration: How long the condition has been present
+  body_location: Location on the body
+  texture: Texture of the affected skin
+  symptoms: Symptoms at the affected area
+  other_symptoms: Other symptoms
+  age: Age group
+  sex: Sex at birth
+  fitzpatrick: Fitzpatrick skin type
+merged_from_shards: 4
