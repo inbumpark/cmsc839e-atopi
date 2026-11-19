@@ -1,0 +1,5 @@
+# Same confidence-only experiment as conf.yaml with Google's general Gemma 3 4B.
+base: conf.yaml
+run_name: conf_gemma3_4b
+model: gemma3:4b
+think: null                          # Gemma has no thinking mode; don't send the flag

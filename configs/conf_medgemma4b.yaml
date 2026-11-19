@@ -1,0 +1,5 @@
+# Same confidence-only experiment as conf.yaml with Google's MedGemma 4b (see the SCIN caveat in mcq_medgemma4b.yaml).
+base: conf.yaml
+run_name: conf_medgemma4b
+model: medgemma:4b
+think: null                          # Gemma has no thinking mode; don't send the flag

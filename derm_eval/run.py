@@ -10,10 +10,14 @@ Re-running the same command resumes: completed (case, mode, stage, sample) entri
 results/<run_name>/shards/<I>of<N>/, so N processes (e.g. one per GPU, each with its own Ollama
 server via --ollama-host) can split a run. Combine them with: python -m derm_eval.merge results/<run_name>
 
-Chains 1->2->4 and 1->3->4 (modes chain_124, chain_134; stage 4 only) continue the cascade
-conversations of a finished run, read from --history-from (its merged raw.jsonl), e.g.
+Chains 1->2->4 and 1->3->4 (modes chain_124, chain_134; stage 4 only) continue cascade
+conversations. Either the run itself has them (modes cascade,chain_124,chain_134 as in
+configs/conf.yaml: each sample is asked 1, 1->2, 1->3, 1->2->4, 1->3->4 in that order), or they
+come from a finished run read from --history-from (its merged raw.jsonl), e.g.
     python -m derm_eval.run --config configs/mcq.yaml --run-name mcq_chains --stages 4 \
         --modes chain_124,chain_134 --history-from results/mcq
+
+mode_stages in the config limits a mode to some stages, e.g. {cascade: [2, 3]} skips 1->4.
 """
 import argparse
 import json
@@ -33,7 +37,7 @@ from .stages import CHAINS, SHARED, StageRunner
 # runs made before a setting existed still resume).
 RESUME_MUST_MATCH = ("model", "temperature", "base_seed", "think", "image_max_side", "images_per_case",
                      "answer_format", "mcq_choices", "mcq_seed", "mcq_weighting", "mcq_pool_path",
-                     "mcq_distractors", "min_label_weight")
+                     "mcq_distractors", "min_label_weight", "target_label", "target_name")
 KEY_DEFAULTS = {"answer_format": "free_text"}
 
 
@@ -54,6 +58,7 @@ def load_done(raw_path):
 def plan_tasks(cases, cfg):
     """Ordered list of (case, sample, stage, mode). Stage 1 is shared by both modes."""
     stages, modes = cfg["stages"], cfg["modes"]
+    only = cfg.get("mode_stages") or {}
     need_stage1 = 1 in stages or "cascade" in modes
     tasks = []
     for case in cases:
@@ -62,7 +67,7 @@ def plan_tasks(cases, cfg):
                 tasks.append((case, k, 1, SHARED))
             for mode in modes:
                 for stage in stages:
-                    if stage != 1 and (mode not in CHAINS or stage == 4):
+                    if stage != 1 and (mode not in CHAINS or stage == 4) and stage in only.get(mode, stages):
                         tasks.append((case, k, stage, mode))
     return tasks
 
@@ -143,7 +148,13 @@ def main():
             raise SystemExit(f"unknown mode '{m}'")
     chains = [m for m in cfg["modes"] if m in CHAINS]
     if chains and not cfg.get("history_from"):
-        raise SystemExit(f"modes {chains} continue an earlier run's cascades; pass --history-from RUN_DIR")
+        # Without --history-from the run must make the 1->2 / 1->3 conversations itself, before the chain.
+        planned = [(s, m) for _, _, s, m in plan_tasks([None], {**cfg, "n_samples": 1})]
+        for m in chains:
+            if ("cascade" not in cfg["modes"] or (CHAINS[m], "cascade") not in planned
+                    or cfg["modes"].index("cascade") > cfg["modes"].index(m)):
+                raise SystemExit(f"mode {m} continues the cascade stage-{CHAINS[m]} chat: list 'cascade' before "
+                                 f"it in modes with stage {CHAINS[m]}, or pass --history-from RUN_DIR")
 
     cases = select_cases(load_cases(resolve(cfg["data_path"])), cfg)
     out_dir = resolve(cfg["results_dir"]) / cfg["run_name"]
@@ -170,7 +181,7 @@ def main():
     done = load_done(raw_path)
     tasks = plan_tasks(cases, cfg)
     todo = [t for t in tasks if (t[0].case_id, t[3], t[2], t[1]) not in done]
-    history = load_history(cfg, todo) if chains else {}
+    history = load_history(cfg, todo) if chains and cfg.get("history_from") else done
     print(f"{len(cases)} cases, {len(tasks)} queries planned, {len(tasks) - len(todo)} already done, "
           f"{len(todo)} to run -> {raw_path}")
 
@@ -191,14 +202,15 @@ def main():
             n_fail += not rec["parse_ok"]
             elapsed = time.time() - t_start
             eta = elapsed / i * (len(todo) - i)
-            ans = f"{rec['diagnosis']} ({rec['confidence']})" if rec["parse_ok"] else f"FAILED {rec['error'] or ''}"
+            ans = f"{rec['diagnosis'] or 'confidence'} ({rec['confidence']})" if rec["parse_ok"] else f"FAILED {rec['error'] or ''}"
             extra = f" asked={rec['requested_field']}" if stage == 3 else ""
-            extra += f" via={rec.get('via_diagnosis')}" if mode in CHAINS and rec["parse_ok"] else ""
+            if mode in CHAINS and rec["parse_ok"]:
+                extra += f" via={rec.get('via_diagnosis') or rec.get('via_confidence')}"
             print(f"[{i}/{len(todo)}] case={case.case_id} s{k} stage{stage} {mode:11s} "
                   f"{rec['latency_s']:5.1f}s{extra} -> {ans}  | ETA {fmt_time(eta)}", flush=True)
 
     print(f"done in {fmt_time(time.time() - t_start)}; {n_fail} unparsed answers. "
-          f"Analyze with: python -m derm_eval.analyze {out_dir}")
+          f"Analyze with: python -m derm_eval.{'conf' if cfg.get('answer_format') == 'confidence' else 'analyze'} {out_dir}")
 
 
 if __name__ == "__main__":

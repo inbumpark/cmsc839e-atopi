@@ -11,6 +11,10 @@ cascade:     stages 2-4 each branch from the stage-1 conversation (same sample/s
 chain_124 / chain_134 (stage 4 only): continue the finished cascade 1->2 or 1->3 conversation
              (rebuilt exactly from its saved records) with the stage-4 turn giving all context,
              i.e. 1->2->4 and 1->3->4. The final turn is the same prompt as cascade 1->4.
+
+answer_format: free_text (name the condition), mcq (pick an option) or confidence (the model is
+told the patient was diagnosed with target_label, e.g. eczema, and only rates its 1-5 confidence
+in that diagnosis). Every format asks for a 1-5 confidence.
 """
 import random
 import re
@@ -35,6 +39,19 @@ def _validate_diagnosis(obj):
         return None
     return {"diagnosis": diagnosis, "reason": str(obj.get("reason") or "").strip(),
             "confidence": confidence}
+
+
+def _validate_confidence(obj):
+    """Confidence-only answer: the 1-5 rating (70 or "4/5"-style junk is rejected) and the reason."""
+    if not obj:
+        return None
+    try:
+        confidence = int(round(float(obj.get("confidence"))))
+    except (TypeError, ValueError):
+        return None
+    if not 1 <= confidence <= 5:
+        return None
+    return {"reason": str(obj.get("reason") or "").strip(), "confidence": confidence}
 
 
 def _validator_mcq(options):
@@ -84,7 +101,13 @@ class StageRunner:
         self.base_seed = cfg["base_seed"]
         self.max_retries = cfg["max_retries"]
         self.images_per_case = cfg.get("images_per_case")
-        self.mcq = cfg.get("answer_format", "free_text") == "mcq"
+        self.format = cfg.get("answer_format", "free_text")
+        if self.format not in ("free_text", "mcq", "confidence"):
+            raise ValueError(f"unknown answer_format {self.format!r}")
+        self.mcq = self.format == "mcq"
+        self.conf = self.format == "confidence"
+        # How the target condition is named in confidence prompts ("eczema").
+        self.target = cfg.get("target_name") or str(cfg.get("target_label", "Eczema")).lower()
         if self.mcq:
             self.pool = load_pool(cfg)
             self.n_choices = cfg.get("mcq_choices", 4)
@@ -115,25 +138,40 @@ class StageRunner:
         if self.mcq:
             opts = self.options(case)
             return prompts.mcq_schema(opts), _validator_mcq(opts)
+        if self.conf:
+            return prompts.CONF_SCHEMA, _validate_confidence
         return prompts.DIAGNOSIS_SCHEMA, _validate_diagnosis
 
-    # Prompt builders that switch between free-text and MCQ wording.
+    # Prompt builders that switch between free-text, MCQ and confidence-only wording.
     def _diagnosis_prompt(self, case, n, keys):
+        if self.conf:
+            return prompts.conf_diagnosis_prompt(n, case.context, keys, self.field_names, self.target)
         if self.mcq:
             return prompts.mcq_diagnosis_prompt(n, case.context, keys, self.field_names, self.options(case))
         return prompts.diagnosis_prompt(n, case.context, keys, self.field_names)
 
     def _select_prompt(self, case, n, keys):
+        if self.conf:
+            return prompts.conf_select_prompt(n, keys, self.field_names, self.target)
         if self.mcq:
             return prompts.mcq_select_prompt(n, keys, self.field_names, self.options(case))
         return prompts.select_prompt(n, keys, self.field_names)
 
+    def _cascade_select_prompt(self, keys):
+        if self.conf:
+            return prompts.conf_cascade_select_prompt(keys, self.field_names)
+        return prompts.cascade_select_prompt(keys, self.field_names)
+
     def _answer_to_request_prompt(self, case, key):
+        if self.conf:
+            return prompts.conf_answer_to_request_prompt(case.context, key, self.field_names, self.target)
         if self.mcq:
             return prompts.mcq_answer_to_request_prompt(case.context, key, self.field_names, self.options(case))
         return prompts.answer_to_request_prompt(case.context, key, self.field_names)
 
     def _cascade_update_prompt(self, case, keys):
+        if self.conf:
+            return prompts.conf_cascade_update_prompt(case.context, keys, self.field_names, self.target)
         if self.mcq:
             return prompts.mcq_cascade_update_prompt(case.context, keys, self.field_names, self.options(case))
         return prompts.cascade_update_prompt(case.context, keys, self.field_names)
@@ -166,7 +204,7 @@ class StageRunner:
             "requested_field": select["requested_field"] if select and select.get("parsed") else None,
             "requested_why": select["parsed"]["why"] if select and select.get("parsed") else None,
             "select_raw": select["raw"] if select else None,
-            "diagnosis": parsed["diagnosis"] if parsed else None,
+            "diagnosis": parsed.get("diagnosis") if parsed else None,
             "reason": parsed["reason"] if parsed else None,
             "confidence": parsed["confidence"] if parsed else None,
             "parse_ok": parsed is not None,
@@ -193,7 +231,7 @@ class StageRunner:
         msgs = self.stage1_messages(case) + [{"role": "assistant", "content": stage1_record["raw"]}]
         if stage == 3:
             available = case.available_fields(self.field_order)
-            msgs += [{"role": "user", "content": prompts.cascade_select_prompt(available, self.field_names)},
+            msgs += [{"role": "user", "content": self._cascade_select_prompt(available)},
                      {"role": "assistant", "content": record["select_raw"]}]
         msgs += [{"role": "user", "content": self._cascade_update_prompt(case, record["fields_given"])},
                  {"role": "assistant", "content": record["raw"]}]
@@ -221,6 +259,7 @@ class StageRunner:
             parsed, raw, lat, att = self._ask(messages, schema, self.seed(k), validate)
             rec = self._record(case, k, stage, mode, available, parsed, raw, lat, att)
             rec["via_diagnosis"] = via_record["diagnosis"]
+            rec["via_confidence"] = via_record["confidence"]
             return rec
 
         n = len(self._image_paths(case))
@@ -250,8 +289,7 @@ class StageRunner:
             if mode == "independent":
                 ask = [self._first_user(case, self._select_prompt(case, n, available))]
             else:
-                ask = history + [{"role": "user", "content": prompts.cascade_select_prompt(
-                    available, self.field_names)}]
+                ask = history + [{"role": "user", "content": self._cascade_select_prompt(available)}]
             parsed, raw, lat, att = self._ask(ask, prompts.select_schema(available), seed,
                                               _validator_select(available, self.field_names))
             select = {"parsed": parsed, "raw": raw, "latency": lat, "attempts": att,

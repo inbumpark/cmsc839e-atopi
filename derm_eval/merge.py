@@ -22,7 +22,7 @@ from .schema import load_cases, select_cases
 MUST_MATCH = ("model", "temperature", "base_seed", "think", "image_max_side", "images_per_case",
               "num_ctx", "n_samples", "stages", "modes", "data_path", "max_cases", "context_fields",
               "answer_format", "mcq_choices", "mcq_seed", "mcq_weighting", "mcq_pool_path", "history_from",
-              "mcq_distractors", "min_label_weight")
+              "mcq_distractors", "min_label_weight", "mode_stages", "target_label", "target_name")
 
 
 def find_shards(run_dir):

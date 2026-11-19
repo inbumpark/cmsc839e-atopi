@@ -189,3 +189,76 @@ def mcq_answer_to_request_prompt(context, key, field_names, options):
 def mcq_cascade_update_prompt(context, keys, field_names, options):
     return MCQ_CASCADE_UPDATE_PROMPT.format(
         context=render_context(context, keys, field_names)) + _options_block(options)
+
+
+# ---- confidence only (answer_format: confidence) -------------------------------------------
+# The model is told the patient was diagnosed with the target condition (target_label, "Eczema")
+# and only rates, 1-5, how confident it is in that diagnosis. It names no condition itself.
+CONF_BASE_PROMPT = (
+    "You are a skilled dermatologist with multiple years of experience observing patients "
+    "with a variety of skin conditions. Here {intro} from a patient who has been diagnosed with "
+    "{target}. Rate your confidence in this diagnosis on a scale of 1 to 5, and give your reason "
+    "for the rating in a few words."
+)
+CONF_SELECT_PROMPT = (
+    "You are a skilled dermatologist with multiple years of experience observing patients "
+    "with a variety of skin conditions. Here {intro} from a patient who has been diagnosed with "
+    "{target}. You will rate your confidence in this diagnosis. Before giving your rating, you "
+    "may ask the patient about exactly ONE of the following pieces of information. Choose the "
+    "one that would be most useful for your rating.\n{menu}\n"
+    'Respond only with JSON of the form {{"requested_field": "<one of the keys above>", '
+    '"why": "<a few words>"}}.'
+)
+CONF_CASCADE_SELECT_PROMPT = (
+    "Before finalizing, you may ask the patient about exactly ONE of the following pieces of "
+    "information. Choose the one that would be most useful for your rating.\n{menu}\n"
+    'Respond only with JSON of the form {{"requested_field": "<one of the keys above>", '
+    '"why": "<a few words>"}}.'
+)
+CONF_CASCADE_UPDATE_PROMPT = (
+    "Additional information from the patient:\n{context}\n"
+    "Taking this into account, rate again your confidence in the {target} diagnosis on a scale "
+    "of 1 to 5, and give your reason for the rating in a few words."
+)
+CONF_ANSWER_TO_REQUEST_PROMPT = (
+    "The patient answers:\n{context}\n"
+    "Now rate your confidence in the {target} diagnosis on a scale of 1 to 5, and give your "
+    "reason for the rating in a few words."
+)
+CONF_ANSWER_FORMAT = (
+    'Respond only with JSON of the form {"reason": "<a few words>", "confidence": <integer 1-5>}.'
+)
+CONF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reason": {"type": "string"},
+        "confidence": {"type": "integer", "minimum": 1, "maximum": 5},
+    },
+    "required": ["reason", "confidence"],
+}
+
+
+def conf_diagnosis_prompt(n_images, context, keys, field_names, target):
+    text = CONF_BASE_PROMPT.format(intro=intro(n_images, bool(keys)), target=target)
+    if keys:
+        text += "\n\nPatient context:\n" + render_context(context, keys, field_names)
+    return text + "\n\n" + CONF_ANSWER_FORMAT
+
+
+def conf_select_prompt(n_images, keys, field_names, target):
+    return CONF_SELECT_PROMPT.format(intro=intro(n_images, False), target=target,
+                                     menu=render_menu(keys, field_names))
+
+
+def conf_cascade_select_prompt(keys, field_names):
+    return CONF_CASCADE_SELECT_PROMPT.format(menu=render_menu(keys, field_names))
+
+
+def conf_answer_to_request_prompt(context, key, field_names, target):
+    return CONF_ANSWER_TO_REQUEST_PROMPT.format(
+        context=render_context(context, [key], field_names), target=target) + "\n\n" + CONF_ANSWER_FORMAT
+
+
+def conf_cascade_update_prompt(context, keys, field_names, target):
+    return CONF_CASCADE_UPDATE_PROMPT.format(
+        context=render_context(context, keys, field_names), target=target) + "\n\n" + CONF_ANSWER_FORMAT

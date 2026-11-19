@@ -91,6 +91,8 @@ class MockClient:
             return "not json", 0.1
         if "answer" in schema["properties"]:                       # MCQ: always pick option B
             return json.dumps({"answer": "B", "reason": "looks like it", "confidence": 3}), 0.1
+        if set(schema["properties"]) == {"reason", "confidence"}:  # confidence only: more turns -> surer
+            return json.dumps({"reason": "itchy", "confidence": min(5, len(messages) // 2 + 1)}), 0.1
         if "requested_field" in schema["properties"]:
             return json.dumps({"requested_field": schema["properties"]["requested_field"]["enum"][-1],
                                "why": "useful"}), 0.1
@@ -386,3 +388,99 @@ def test_select_cases_min_label_weight():
     assert [c.case_id for c in select_cases(cases, {"min_label_weight": 1.0})] == ["0", "3"]
     assert [c.case_id for c in select_cases(cases, {"min_label_weight": 0.6})] == ["0", "2", "3"]
     assert [c.case_id for c in select_cases(cases, {"min_label_weight": 1.0, "max_cases": 1})] == ["0"]
+
+
+# ---- confidence-only format (configs/conf.yaml) ----------------------------------------------
+CONF_CFG = load_config(resolve("configs/conf.yaml"))
+
+
+def test_confidence_validator():
+    from derm_eval.stages import _validate_confidence as v
+    assert v({"reason": "r", "confidence": 4}) == {"reason": "r", "confidence": 4}
+    assert v({"confidence": "2"})["confidence"] == 2
+    for bad in ({"confidence": 6}, {"confidence": 0}, {"confidence": "high"}, {"reason": "r"}, None):
+        assert v(bad) is None
+
+
+def test_confidence_prompts_state_the_diagnosis_in_every_turn():
+    c = MockClient()
+    r = StageRunner(c, {**CONF_CFG, "max_retries": 0})
+    s1 = r.run(CASE, 0, 1, SHARED)
+    first = c.calls[0]["messages"][0]["content"]
+    assert "You are a skilled dermatologist" in first
+    assert "Here is a photo from a patient who has been diagnosed with eczema" in first
+    assert "Rate your confidence in this diagnosis on a scale of 1 to 5" in first
+    assert "percentage" not in first and '"diagnosis"' not in first
+    assert c.calls[0]["schema"] == prompts.CONF_SCHEMA
+    assert s1["confidence"] == 1 and s1["diagnosis"] is None and s1["parse_ok"]
+
+    s2 = r.run(CASE, 0, 2, "cascade", stage1_record=s1)
+    s3 = r.run(CASE, 0, 3, "cascade", stage1_record=s1)
+    assert "most useful for your rating" in c.calls[-2]["messages"][-1]["content"]
+    for rec, via, mode in ((s2, 2, "chain_124"), (s3, 3, "chain_134")):
+        chain = r.run(CASE, 0, 4, mode, stage1_record=s1, via_record=rec)
+        msgs = c.calls[-1]["messages"]
+        assert msgs[:-1] == r.cascade_messages(CASE, via, s1, rec)
+        assert "rate again your confidence in the eczema diagnosis" in msgs[-1]["content"]
+        assert all(v in msgs[-1]["content"] for v in CASE.context.values())
+        assert chain["via_confidence"] == rec["confidence"] and chain["confidence"] == rec["confidence"] + 1
+    for stage in (2, 3, 4):                                    # new-chat stages also work in this format
+        assert r.run(CASE, 0, stage, "independent")["parse_ok"]
+
+
+def test_conf_config_plans_the_six_paths_in_order():
+    tasks = plan_tasks([CASE], {**CONF_CFG, "n_samples": 1})
+    assert [(s, m) for _, _, s, m in tasks] == [(1, SHARED), (2, "cascade"), (3, "cascade"), (4, "cascade"),
+                                                (4, "chain_124"), (4, "chain_134")]
+    only = plan_tasks([CASE], {**CONF_CFG, "n_samples": 1, "mode_stages": {"cascade": [2, 3]}})
+    assert [(s, m) for _, _, s, m in only] == [(1, SHARED), (2, "cascade"), (3, "cascade"),
+                                               (4, "chain_124"), (4, "chain_134")]
+
+
+def test_conf_run_and_analysis_end_to_end(tmp_path, monkeypatch, capsys):
+    from derm_eval import conf, run
+
+    rows = [{"case_id": f"c{i}", "images": ["x.png"], "label": "Eczema", "label_confidence": lc,
+             "differential": {"Eczema": w, "Psoriasis": round(1 - w, 2)} if w < 1 else {"Eczema": 1.0},
+             "context": ctx}
+            for i, (w, lc, ctx) in enumerate([(1.0, 5, CASE.context), (0.5, 3, {"symptoms": "itching", "age": "18-29"}),
+                                              (0.33, 1, {"duration": "1 day", "texture": "flat"}), (0.67, 4, {})])]
+    data = write_cases(tmp_path, rows)
+    cfg = tmp_path / "conf.yaml"
+    cfg.write_text(yaml.safe_dump({"base": str(resolve("configs/conf.yaml")), "data_path": str(data),
+                                   "results_dir": str(tmp_path / "results"), "n_samples": 2}))
+
+    class Client(MockClient):
+        def __init__(self, cfg):
+            super().__init__()
+
+        def check(self):
+            pass
+
+    monkeypatch.setattr(run, "OllamaClient", Client)
+    monkeypatch.setattr("sys.argv", ["run", "--config", str(cfg)])
+    run.main()
+    out = tmp_path / "results" / "conf"
+    recs = [json.loads(l) for l in (out / "raw.jsonl").open()]
+    assert len(recs) == 4 * 2 * 6
+    assert sum(r["error"] == "no context fields" for r in recs) == 2 * 5      # c3 has no context
+    run.main()                                                                # resume: nothing left to do
+    assert len((out / "raw.jsonl").read_text().splitlines()) == len(recs)
+
+    monkeypatch.setattr("sys.argv", ["conf", str(out), "--n-boot", "200"])
+    conf.main()
+    import pandas as pd
+    t = pd.read_csv(out / "conf_analysis" / "conf_by_path.csv")
+    assert list(t.path) == ["1", "1->2", "1->3", "1->4", "1->2->4", "1->3->4"] and set(t.n_cases) == {3}
+    assert list(t.mean_conf) == [1, 2, 3, 2, 3, 4]                # mock: messages in the chat // 2 + 1
+    assert list(t.mean_derm_conf) == [3] * 6 and list(t.diff_vs_derm_conf) == [-2, -1, 0, -1, 0, 1]
+    step = pd.read_csv(out / "conf_analysis" / "conf_step_change.csv")
+    assert dict(zip(step.path, step.mean_change)) == {"1->2": 1, "1->3": 2, "1->4": 1, "1->2->4": 1, "1->3->4": 1}
+    assert set(step.raised) == {1.0}
+
+
+def test_chains_without_history_need_cascade_first(tmp_path, monkeypatch):
+    from derm_eval import run
+    monkeypatch.setattr("sys.argv", ["run", "--config", "configs/conf.yaml", "--modes", "chain_124"])
+    with pytest.raises(SystemExit, match="history-from"):
+        run.main()

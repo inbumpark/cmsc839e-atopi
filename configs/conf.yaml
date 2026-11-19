@@ -1,0 +1,16 @@
+# Confidence-only variant: the model is told the patient was diagnosed with eczema and only rates
+# its confidence in that diagnosis on a scale of 1 to 5 (it names no condition and gives no percentage).
+# Every sample is one growing conversation, asked in this order:
+#   1          image only
+#   1 -> 2     + one random context field
+#   1 -> 3     + one context field the model asks for
+#   1 -> 4     + all context
+#   1 -> 2 -> 4   the 1->2 chat, then all context
+#   1 -> 3 -> 4   the 1->3 chat, then all context
+# (1->2, 1->3 and 1->4 all branch from the same stage-1 answer; the chains continue those exact chats.)
+# Analyze with: python -m derm_eval.conf results/conf
+base: default.yaml
+run_name: conf
+answer_format: confidence
+modes: [cascade, chain_124, chain_134]   # order matters: the chains continue the cascade chats of this run
+stages: [1, 2, 3, 4]                  # cascade runs 2, 3, 4; the chains are stage 4 only

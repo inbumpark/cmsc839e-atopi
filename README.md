@@ -143,7 +143,7 @@ python -m derm_eval.analyze results/default
 | `--modes independent,cascade` | subset of modes (also `chain_124`, `chain_134`; see "Cascade chains" below) |
 | `--shard I/N` | run only shard I of N (0-based); see "Splitting a run across GPUs" below |
 | `--ollama-host URL` | use this Ollama server instead of `ollama_host` from the config |
-| `--history-from RUN_DIR` | finished run whose cascade conversations `chain_*` modes continue |
+| `--history-from RUN_DIR` | finished run whose cascade conversations `chain_*` modes continue (not needed when the run itself has `cascade` first, as in `configs/conf.yaml`) |
 
 - **Cost:** each case needs `n_samples × (1 + 3 × #modes)` = 35 answers with the defaults (stage 3 makes 2 calls). Each line of the progress output shows the latency and an ETA; multiply the pilot's per-query time to estimate the full run.
 - **Resuming:** if a run is interrupted (Ctrl-C, sleep, crash), re-run the *same* command; finished queries are skipped. The runner refuses to mix results if you change the model/temperature/seed settings under an existing run name.
@@ -169,6 +169,41 @@ python -m derm_eval.run --config configs/mcq.yaml --run-name mcq_chains --stages
 python -m derm_eval.chains results/mcq results/mcq_chains --exclude-no-context
 ```
 `chains` writes accuracy for 1, 1→2, 1→3, 1→4, 1→2→4, 1→3→4 (and fresh-chat stage 4), plus paired differences, to `results/mcq_chains/analysis_with_context/`. The history run must use the same model and settings (checked at start).
+
+### Confidence-only experiment (`configs/conf.yaml`)
+The model is **told the patient was diagnosed with eczema** and only rates its confidence in that diagnosis on a scale of 1 to 5 (`answer_format: confidence`). It names no condition itself. The prompt keeps the proposal's framing (`CONF_*` in `derm_eval/prompts.py`):
+
+> You are a skilled dermatologist … Here is a photo from a patient who has been diagnosed with eczema. Rate your confidence in this diagnosis on a scale of 1 to 5, and give your reason for the rating in a few words.
+
+Each sample is one growing conversation, asked in this order (6 answers, 7 model calls per sample):
+
+| path | what the model has seen |
+|---|---|
+| 1 | image only |
+| 1→2 | + one random context field |
+| 1→3 | + one context field the model asks for |
+| 1→4 | + all context |
+| 1→2→4 | the 1→2 chat, then all context |
+| 1→3→4 | the 1→3 chat, then all context |
+
+1→2, 1→3 and 1→4 all branch from the same stage-1 answer, and the two chains continue the 1→2 / 1→3 chats exactly, so no `--history-from` is needed: `modes: [cascade, chain_124, chain_134]`. (`mode_stages: {cascade: [2, 3]}` would skip the direct 1→4.)
+```bash
+python -m derm_eval.run --config configs/conf.yaml --max-cases 20 --run-name conf_pilot   # pilot
+python -m derm_eval.run --config configs/conf.yaml                                        # -> results/conf
+python -m derm_eval.conf results/conf                                                     # -> results/conf/conf_analysis/
+```
+`--shard` / `merge` work as above. `configs/conf_medgemma4b.yaml` and `configs/conf_gemma3_4b.yaml` run the same experiment with the other two models.
+
+`derm_eval.conf` (not `analyze`, which grades diagnoses) writes these tables. Every case is labelled Eczema; the references are the dermatologists' own 1–5 confidence in that label and their weight for Eczema in the case's differential (1.0 = all of them said only Eczema). Cases with no context are left out.
+
+| file | what |
+|---|---|
+| `conf_by_path.csv` | per path: mean confidence (95% CI over cases), share of answers at each level 1–5, spread across seeds, and difference / mean absolute error / Spearman against the dermatologist confidence, Spearman against the dermatologist weight |
+| `conf_step_change.csv` | what the last step did to the same sample's previous rating: mean change (CI, p), share raised / lowered / unchanged |
+| `conf_paired_paths.csv` | paired differences between paths (1→3 vs 1→2, 1→3→4 vs 1→2→4, each chain vs 1 and vs 1→4) |
+| `conf_by_field.csv` | stages 2 and 3 by the field given: mean confidence, change from stage 1, how often the model asks for it |
+| `conf_by_derm_confidence.csv`, `conf_by_derm_weight.csv` | mean confidence per path, by how sure the dermatologists were |
+| `answers.csv` | row-level data |
 
 All settings (model, temperature, seeds, image size, number of samples, the eczema target label, context fields) are in `configs/default.yaml`. To make a variant, create a new YAML with `base: default.yaml` and only the keys you change (see `configs/smoke.yaml`).
 
@@ -448,6 +483,7 @@ derm_eval/schema.py    data loading + validation
 derm_eval/merge.py     combine --shard outputs into one run
 derm_eval/chains.py    compare cascade paths 1->2->4 / 1->3->4 against 1->2, 1->3, 1->4
 derm_eval/mcq.py       multiple-choice options (Eczema + sampled or fixed distractors)
+derm_eval/conf.py      analysis of confidence-only runs (configs/conf.yaml)
 scripts/make_sample_data.py   synthetic smoke-test data
 scripts/rank_mcq_distractors.py  rank SCIN labels by how rarely they co-occur with Eczema
 scripts/results_tables.py     print the README results tables
